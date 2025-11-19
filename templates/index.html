@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Facial Recognition Attendance</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background-color: #f0f2f5;
+            background-image: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            padding: 20px 0;
+        }
+        #container {
+            width: 90%;
+            max-width: 700px;
+            border-radius: 12px;
+            padding: 30px;
+            background-color: white;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+            text-align: center;
+            position: relative; /* Added for absolute positioning of logo if desired, but flex will work too */
+        }
+        h1 {
+            color: #2c3e50;
+            margin-top: 0;
+            margin-bottom: 25px;
+        }
+        video {
+            width: 100%;
+            max-width: 640px;
+            height: auto;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: #000;
+        }
+        button {
+            font-family: 'Poppins', sans-serif;
+            font-size: 1.2em;
+            font-weight: 600;
+            padding: 12px 25px;
+            margin-top: 20px;
+            cursor: pointer;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            transition: all 0.3s ease;
+        }
+        button:hover:not(:disabled) {
+            background-color: #218838;
+            transform: translateY(-2px);
+        }
+        button:disabled {
+            background-color: #9E9E9E;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+        #result {
+            margin-top: 25px;
+            font-size: 1.25em;
+            font-weight: 600;
+            min-height: 1.5em;
+        }
+        .info { color: #333; }
+        .success { color: #28a745; }
+        .error { color: #dc3545; }
+        .warning { color: #ffc107; }
+
+        /* ✨ NEW: Logo Styling */
+        #university-logo {
+            max-width: 180px; /* Adjust size as needed */
+            height: auto;
+            margin-bottom: 20px; /* Space below the logo */
+            float: left; /* Float to the left */
+            margin-right: 20px; /* Space to the right of the logo */
+            margin-top: -10px; /* Adjust vertical position slightly */
+        }
+
+        /* Clear float for the heading if needed */
+        h1::after {
+            content: "";
+            display: table;
+            clear: both;
+        }
+
+        /* For smaller screens, stack logo and heading */
+        @media (max-width: 600px) {
+            #university-logo {
+                float: none;
+                display: block;
+                margin: 0 auto 20px auto; /* Center logo, add bottom margin */
+            }
+            h1 {
+                clear: both; /* Ensure heading is below the logo */
+            }
+        }
+
+    </style>
+</head>
+<body>
+
+    <div id="container">
+        <img id="university-logo" src="{{ url_for('static', filename='images/bennett_university_logo.png') }}" alt="Bennett University Logo">
+        
+        <h1>Facial Recognition Attendance</h1>
+        <video id="video" width="640" height="480" autoplay playsinline muted></video>
+        <button id="capture">Mark Attendance</button>
+        <div id="result" class="info">Please look at the camera and click the button.</div>
+        
+        <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const captureButton = document.getElementById('capture');
+        const resultDiv = document.getElementById('result');
+        const context = canvas.getContext('2d');
+
+        function getGreeting() {
+            const hour = new Date().getHours();
+            if (hour < 12) return "Good morning";
+            if (hour < 18) return "Good afternoon";
+            return "Good evening";
+        }
+
+        const emotionMap = {
+            'happy': '😊',
+            'sad': '😢',
+            'angry': '😠',
+            'fear': '😨',
+            'disgust': '🤢',
+            'surprise': '😮',
+            'neutral': '😐'
+        };
+
+        async function setupWebcam() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: true,
+                    audio: false 
+                });
+                video.srcObject = stream;
+            } catch (err) {
+                console.error("Error accessing webcam: ", err);
+                resultDiv.textContent = "Error: Could not access webcam.";
+                resultDiv.className = "error";
+            }
+        }
+
+        captureButton.addEventListener('click', async () => {
+            resultDiv.textContent = 'Recognizing...';
+            resultDiv.className = 'info';
+            captureButton.disabled = true;
+
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageDataURL = canvas.toDataURL('image/jpeg', 0.9);
+
+            try {
+                const response = await fetch('/recognize', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image: imageDataURL }),
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                console.log(result);
+
+                let messages = [];
+                let overallClass = 'info';
+
+                if (result.new_check_ins && result.new_check_ins.length > 0) {
+                    const names = result.new_check_ins.join(', ');
+                    const greeting = getGreeting();
+                    const emotionEmoji = emotionMap[result.emotion] || '😐';
+                    messages.push(`${greeting}, ${names}! You seem ${result.emotion} today ${emotionEmoji}`);
+                    overallClass = 'success';
+                }
+
+                if (result.already_present && result.already_present.length > 0) {
+                    const names = result.already_present.join(', ');
+                    messages.push(`You are already marked present, ${names}.`);
+                    overallClass = 'warning';
+                }
+
+                if (result.error) {
+                    messages.push(`Error: ${result.error}`);
+                    overallClass = 'error';
+                }
+
+                if (messages.length === 0) {
+                    messages.push('No one recognized. Please try again.');
+                    overallClass = 'info';
+                }
+
+                resultDiv.innerHTML = messages.join('<br>');
+                resultDiv.className = overallClass;
+
+
+            } catch (error) {
+                console.error('Error sending image to server:', error);
+                resultDiv.textContent = 'Error communicating with server.';
+                resultDiv.className = 'error';
+            } finally {
+                captureButton.disabled = false;
+            }
+        });
+
+        setupWebcam();
+    </script>
+
+</body>
+</html>
